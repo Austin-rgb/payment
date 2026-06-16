@@ -15,7 +15,6 @@
 
 use crate::models::PendingDebit;
 
-use anyhow::Result;
 use async_trait::async_trait;
 use moka::future::Cache;
 use uuid::Uuid;

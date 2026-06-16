@@ -8,7 +8,6 @@ use std::sync::Arc;
 use anyhow::Result;
 use chrono::Utc;
 use tracing::{info, warn};
-use uuid::Uuid;
 
 use crate::{
     event_store::EventStore,

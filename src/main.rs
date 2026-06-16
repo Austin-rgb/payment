@@ -10,9 +10,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use actix_web::{web, App, HttpServer};
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use tracing::info;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::EnvFilter;
 pub mod event_store;
 pub mod handlers;
 pub mod models;
