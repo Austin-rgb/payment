@@ -8,14 +8,11 @@
 
 use std::sync::Arc;
 
-use actix_web::{web, HttpResponse};
+use actix_web::{HttpResponse, web};
 use tracing::error;
 
 use crate::{
-    event_store::EventStore,
-    models::CreditRequest,
-    pending_store::PendingDebitStore,
-    repository::PaymentRepository,
+    models::CreditRequest, pending_store::PendingDebitStore, repository::PaymentRepository,
     service::PaymentService,
 };
 
@@ -24,8 +21,8 @@ use crate::{
 // ---------------------------------------------------------------------------
 
 /// Application state injected into every handler via `web::Data`.
-pub struct AppState<R, P, E> {
-    pub service: Arc<PaymentService<R, P, E>>,
+pub struct AppState<R, P> {
+    pub service: Arc<PaymentService<R, P>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -38,14 +35,13 @@ pub struct AppState<R, P, E> {
 /// [`PaymentService::credit`], and returns:
 /// - `200 OK` on success (no body),
 /// - `500 Internal Server Error` on any error.
-async fn post_credit<R, P, E>(
-    state: web::Data<AppState<R, P, E>>,
-    body:  web::Json<CreditRequest>,
+async fn post_credit<R, P>(
+    state: web::Data<AppState<R, P>>,
+    body: web::Json<CreditRequest>,
 ) -> HttpResponse
 where
     R: PaymentRepository,
     P: PendingDebitStore,
-    E: EventStore,
 {
     match state.service.credit(body.into_inner()).await {
         Ok(()) => HttpResponse::Ok().finish(),
@@ -69,15 +65,10 @@ where
 ///     .app_data(web::Data::new(state))
 ///     .configure(handlers::configure::<SqliteRepository, MokaPendingDebitStore, MokaEventStore>)
 /// ```
-pub fn configure<R, P, E>(cfg: &mut web::ServiceConfig)
+pub fn configure<R, P>(cfg: &mut web::ServiceConfig)
 where
     R: PaymentRepository,
     P: PendingDebitStore,
-    E: EventStore,
 {
-    cfg.service(
-        web::scope("/payment")
-            .route("/credit", web::post().to(post_credit::<R, P, E>)),
-    );
+    cfg.service(web::scope("/payment").route("/credit", web::post().to(post_credit::<R, P>)));
 }
-

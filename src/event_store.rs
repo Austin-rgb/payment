@@ -75,11 +75,7 @@ impl EventStore for MokaEventStore {
         // Moka does not expose a transactional drain, so there is a small
         // window where a freshly inserted event could be missed — acceptable
         // for best-effort delivery.
-        let entries: Vec<PendingEvent> = self
-            .cache
-            .iter()
-            .map(|(_, v)| v.clone())
-            .collect();
+        let entries: Vec<PendingEvent> = self.cache.iter().map(|(_, v)| v.clone()).collect();
 
         for event in &entries {
             self.cache.invalidate(&event.id).await;
@@ -102,8 +98,12 @@ mod tests {
     async fn enqueue_then_drain() {
         let store = MokaEventStore::new(64);
 
-        store.enqueue("payment.debit.success".into(), json!({"amount": 100})).await;
-        store.enqueue("payment.debit.failed".into(),  json!({"amount": 50})).await;
+        store
+            .enqueue("payment.debit.success".into(), json!({"amount": 100}))
+            .await;
+        store
+            .enqueue("payment.debit.failed".into(), json!({"amount": 50}))
+            .await;
 
         let drained = store.drain().await;
         assert_eq!(drained.len(), 2);
@@ -117,11 +117,10 @@ mod tests {
         let store = MokaEventStore::new(64);
         store.enqueue("topic".into(), json!({})).await;
 
-        let first  = store.drain().await;
+        let first = store.drain().await;
         let second = store.drain().await;
 
         assert_eq!(first.len(), 1);
         assert!(second.is_empty());
     }
 }
-

@@ -85,11 +85,10 @@ impl PaymentRepository for SqliteRepository {
         let mut tx = self.pool.begin().await?;
 
         // Read current balance inside the transaction.
-        let row: Option<(i64,)> =
-            sqlx::query_as("SELECT balance FROM accounts WHERE user_id = ?")
-                .bind(&uid)
-                .fetch_optional(&mut *tx)
-                .await?;
+        let row: Option<(i64,)> = sqlx::query_as("SELECT balance FROM accounts WHERE user_id = ?")
+            .bind(&uid)
+            .fetch_optional(&mut *tx)
+            .await?;
 
         let balance = match row {
             Some((b,)) => b,
@@ -117,11 +116,10 @@ impl PaymentRepository for SqliteRepository {
     async fn balance(&self, user_id: Uuid) -> Result<u64> {
         let uid = user_id.to_string();
 
-        let row: Option<(i64,)> =
-            sqlx::query_as("SELECT balance FROM accounts WHERE user_id = ?")
-                .bind(&uid)
-                .fetch_optional(&self.pool)
-                .await?;
+        let row: Option<(i64,)> = sqlx::query_as("SELECT balance FROM accounts WHERE user_id = ?")
+            .bind(&uid)
+            .fetch_optional(&self.pool)
+            .await?;
 
         Ok(row.map(|(b,)| b as u64).unwrap_or(0))
     }
@@ -130,12 +128,11 @@ impl PaymentRepository for SqliteRepository {
         let did = debit_id.to_string();
 
         // SQLite returns 0 or 1 for EXISTS; fetch as i64 to avoid driver quirks.
-        let row: (i64,) = sqlx::query_as(
-            "SELECT EXISTS( SELECT 1 FROM processed_debits WHERE debit_id = ? )",
-        )
-        .bind(&did)
-        .fetch_one(&self.pool)
-        .await?;
+        let row: (i64,) =
+            sqlx::query_as("SELECT EXISTS( SELECT 1 FROM processed_debits WHERE debit_id = ? )")
+                .bind(&did)
+                .fetch_one(&self.pool)
+                .await?;
 
         Ok(row.0 != 0)
     }
@@ -151,4 +148,3 @@ impl PaymentRepository for SqliteRepository {
         Ok(())
     }
 }
-

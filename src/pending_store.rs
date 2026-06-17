@@ -55,7 +55,7 @@ impl MokaPendingDebitStore {
     /// each internal cache independently).
     pub fn new(max_capacity: u64) -> Self {
         Self {
-            debits:     Cache::new(max_capacity),
+            debits: Cache::new(max_capacity),
             user_index: Cache::new(max_capacity),
         }
     }
@@ -65,16 +65,12 @@ impl MokaPendingDebitStore {
 impl PendingDebitStore for MokaPendingDebitStore {
     async fn add(&self, pending: PendingDebit) {
         let debit_id = pending.debit_id;
-        let user_id  = pending.user_id;
+        let user_id = pending.user_id;
 
         self.debits.insert(debit_id, pending).await;
 
         // Append debit_id to the user's index list.
-        let mut ids = self
-            .user_index
-            .get(&user_id)
-            .await
-            .unwrap_or_default();
+        let mut ids = self.user_index.get(&user_id).await.unwrap_or_default();
 
         if !ids.contains(&debit_id) {
             ids.push(debit_id);
@@ -103,7 +99,7 @@ impl PendingDebitStore for MokaPendingDebitStore {
     async fn pending_for_user(&self, user_id: Uuid) -> Vec<PendingDebit> {
         let ids = match self.user_index.get(&user_id).await {
             Some(ids) => ids,
-            None      => return vec![],
+            None => return vec![],
         };
 
         let mut result = Vec::with_capacity(ids.len());
@@ -137,8 +133,8 @@ mod tests {
     #[tokio::test]
     async fn add_and_lookup() {
         let store = MokaPendingDebitStore::new(128);
-        let uid   = Uuid::new_v4();
-        let did   = Uuid::new_v4();
+        let uid = Uuid::new_v4();
+        let did = Uuid::new_v4();
 
         store.add(make_pending(did, uid, 100)).await;
 
@@ -150,8 +146,8 @@ mod tests {
     #[tokio::test]
     async fn remove_cleans_index() {
         let store = MokaPendingDebitStore::new(128);
-        let uid   = Uuid::new_v4();
-        let did   = Uuid::new_v4();
+        let uid = Uuid::new_v4();
+        let did = Uuid::new_v4();
 
         store.add(make_pending(did, uid, 100)).await;
         store.remove(did).await;
@@ -162,9 +158,9 @@ mod tests {
     #[tokio::test]
     async fn multiple_debits_per_user() -> Result<()> {
         let store = MokaPendingDebitStore::new(128);
-        let uid   = Uuid::new_v4();
-        let did1  = Uuid::new_v4();
-        let did2  = Uuid::new_v4();
+        let uid = Uuid::new_v4();
+        let did1 = Uuid::new_v4();
+        let did2 = Uuid::new_v4();
 
         store.add(make_pending(did1, uid, 50)).await;
         store.add(make_pending(did2, uid, 75)).await;
@@ -179,4 +175,3 @@ mod tests {
         Ok(())
     }
 }
-

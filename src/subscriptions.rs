@@ -9,8 +9,8 @@ use std::sync::Arc;
 use event_stream::{EventStream, Subscriber};
 
 use crate::{
-    event_store::EventStore, models::DebitRequest, pending_store::PendingDebitStore,
-    repository::PaymentRepository, service::PaymentService,
+    models::DebitRequest, pending_store::PendingDebitStore, repository::PaymentRepository,
+    service::PaymentService,
 };
 // ---------------------------------------------------------------------------
 // Subscription wiring
@@ -22,13 +22,12 @@ use crate::{
 /// [`PaymentService::handle_debit_request`]. Errors are logged and the event
 /// is dropped (no broker-level retry at this layer — rely on the broker's own
 /// redelivery policy and the service's idempotency guard).
-pub async fn register_subscriptions<R, P, E>(
-    service: Arc<PaymentService<R, P, E>>,
+pub async fn register_subscriptions<R, P>(
+    service: Arc<PaymentService<R, P>>,
     es: Arc<dyn EventStream>,
 ) where
     R: PaymentRepository,
     P: PendingDebitStore,
-    E: EventStore,
 {
     let subscriber = PaymentSubscriber { service };
     if let Err(e) = subscriber.subscribe(es).await {
@@ -36,16 +35,13 @@ pub async fn register_subscriptions<R, P, E>(
     };
 }
 
-struct PaymentSubscriber<R, P, E> {
-    service: Arc<PaymentService<R, P, E>>,
+struct PaymentSubscriber<R, P> {
+    service: Arc<PaymentService<R, P>>,
 }
 
 #[async_trait::async_trait]
-impl<
-    R: PaymentRepository + Send + Sync + 'static,
-    P: PendingDebitStore + Send + Sync + 'static,
-    E: EventStore + Send + Sync + 'static,
-> Subscriber<DebitRequest> for PaymentSubscriber<R, P, E>
+impl<R: PaymentRepository + Send + Sync + 'static, P: PendingDebitStore + Send + Sync + 'static>
+    Subscriber<DebitRequest> for PaymentSubscriber<R, P>
 {
     async fn on_message(&self, event: event_stream::Event<DebitRequest>, _subject: &str) {
         if let Err(e) = self

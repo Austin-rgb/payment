@@ -7,10 +7,10 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::Utc;
+use event_stream::{Event, EventMetaData, EventStream};
 use tracing::{info, warn};
 
 use crate::{
-    event_store::EventStore,
     models::{
         CreditRequest, DebitFailed, DebitFailureReason, DebitRequest, DebitSuccess, PendingDebit,
     },
@@ -27,27 +27,31 @@ use crate::{
 /// All durable writes go through `repo`; ephemeral pending-debit state lives
 /// in `pending`; outbound events are queued in `events` for a background
 /// worker to forward to the broker.
-pub struct PaymentService<R, P, E> {
-    repo:         Arc<R>,
-    pending:      Arc<P>,
-    events:       Arc<E>,
+pub struct PaymentService<R, P> {
+    repo: Arc<R>,
+    pending: Arc<P>,
+    es: Arc<dyn EventStream>,
     /// Maximum time to wait for funds before abandoning a pending debit.
     maximum_wait: chrono::Duration,
 }
 
-impl<R, P, E> PaymentService<R, P, E>
+impl<R, P> PaymentService<R, P>
 where
     R: PaymentRepository,
     P: PendingDebitStore,
-    E: EventStore,
 {
     pub fn new(
-        repo:         Arc<R>,
-        pending:      Arc<P>,
-        events:       Arc<E>,
+        repo: Arc<R>,
+        pending: Arc<P>,
+        es: Arc<dyn EventStream>,
         maximum_wait: chrono::Duration,
     ) -> Self {
-        Self { repo, pending, events, maximum_wait }
+        Self {
+            repo,
+            pending,
+            es,
+            maximum_wait,
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -100,27 +104,24 @@ where
 
         let failed = DebitFailed {
             debit_id: debit.debit_id,
-            user_id:  debit.user_id,
-            amount:   debit.amount,
+            user_id: debit.user_id,
+            amount: debit.amount,
             balance,
-            reason:   DebitFailureReason::MaximumWaitExceeded,
+            reason: DebitFailureReason::MaximumWaitExceeded,
         };
-        self.events
-            .enqueue(
-                "payment.debit.failed".into(),
-                serde_json::to_value(&failed)?,
-            )
-            .await;
+
+        let emd = EventMetaData::new("payment");
+        let event = Event::new(emd, failed);
+        if let Err(e) = event.publish(self.es.clone()).await {
+            tracing::error!("Failed to publish event: {e}");
+        };
 
         Ok(())
     }
 
     /// Attempt one debit retry for a live pending debit.
     async fn retry_pending_debit(&self, debit: &PendingDebit) -> Result<()> {
-        let succeeded = self
-            .repo
-            .try_debit(debit.user_id, debit.amount)
-            .await?;
+        let succeeded = self.repo.try_debit(debit.user_id, debit.amount).await?;
 
         if succeeded {
             info!(
@@ -134,15 +135,14 @@ where
 
             let success = DebitSuccess {
                 debit_id: debit.debit_id,
-                user_id:  debit.user_id,
-                amount:   debit.amount,
+                user_id: debit.user_id,
+                amount: debit.amount,
             };
-            self.events
-                .enqueue(
-                    "payment.debit.success".into(),
-                    serde_json::to_value(&success)?,
-                )
-                .await;
+            let emd = EventMetaData::new("payment");
+            let event = Event::new(emd, success);
+            if let Err(e) = event.publish(self.es.clone()).await {
+                tracing::error!("Failed to publish event: {e}");
+            };
         }
         // If still insufficient leave the pending debit in place.
 
@@ -186,22 +186,22 @@ where
 
             let success = DebitSuccess {
                 debit_id: req.debit_id,
-                user_id:  req.user_id,
-                amount:   req.amount,
+                user_id: req.user_id,
+                amount: req.amount,
             };
-            self.events
-                .enqueue(
-                    "payment.debit.success".into(),
-                    serde_json::to_value(&success)?,
-                )
-                .await;
+
+            let emd = EventMetaData::new("payment");
+            let event = Event::new(emd, success);
+            if let Err(e) = event.publish(self.es.clone()).await {
+                tracing::error!("Failed to publish event: {e}");
+            };
         } else {
             // Insufficient funds — park for deferred retry.
             let expires_at = Utc::now() + self.maximum_wait;
             let pending = PendingDebit {
                 debit_id: req.debit_id,
-                user_id:  req.user_id,
-                amount:   req.amount,
+                user_id: req.user_id,
+                amount: req.amount,
                 expires_at,
             };
             info!(
@@ -215,14 +215,6 @@ where
 
         Ok(())
     }
-
-    // -----------------------------------------------------------------------
-    // Accessors (for use by handlers / workers)
-    // -----------------------------------------------------------------------
-
-    pub fn events(&self) -> Arc<E> {
-        self.events.clone()
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -232,5 +224,4 @@ where
 /// Convenience alias for the concrete service used in Actix handlers.
 ///
 /// Replace the type parameters with your chosen implementations.
-pub type SharedService<R, P, E> = Arc<PaymentService<R, P, E>>;
-
+pub type SharedService<R, P> = Arc<PaymentService<R, P>>;
