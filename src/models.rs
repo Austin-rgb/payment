@@ -1,6 +1,7 @@
 //! Data models shared across the payment service.
 
 use chrono::{DateTime, Utc};
+use event_stream::{Publishable, Subscribable};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -12,7 +13,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreditRequest {
     pub user_id: Uuid,
-    pub amount:  u64,
+    pub amount: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -27,8 +28,12 @@ pub struct CreditRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebitRequest {
     pub debit_id: Uuid,
-    pub user_id:  Uuid,
-    pub amount:   u64,
+    pub user_id: Uuid,
+    pub amount: u64,
+}
+
+impl Subscribable for DebitRequest {
+    const SUBJECT: &'static str = "payment.debit.request";
 }
 
 // ---------------------------------------------------------------------------
@@ -39,8 +44,12 @@ pub struct DebitRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebitSuccess {
     pub debit_id: Uuid,
-    pub user_id:  Uuid,
-    pub amount:   u64,
+    pub user_id: Uuid,
+    pub amount: u64,
+}
+
+impl Publishable for DebitSuccess {
+    const SUBJECT: &'static str = "payment.debit.success";
 }
 
 /// Emitted on `payment.debit.failed` when a debit could not be fulfilled
@@ -52,11 +61,15 @@ pub struct DebitSuccess {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebitFailed {
     pub debit_id: Uuid,
-    pub user_id:  Uuid,
-    pub amount:   u64,
+    pub user_id: Uuid,
+    pub amount: u64,
     /// Balance at the instant of failure — not necessarily zero.
-    pub balance:  u64,
-    pub reason:   DebitFailureReason,
+    pub balance: u64,
+    pub reason: DebitFailureReason,
+}
+
+impl Publishable for DebitFailed {
+    const SUBJECT: &'static str = "payment.debit.failed";
 }
 
 /// Why a deferred debit ultimately failed.
@@ -80,9 +93,9 @@ pub enum DebitFailureReason {
 /// keeps the implementation simple and avoids distributed locking.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingDebit {
-    pub debit_id:   Uuid,
-    pub user_id:    Uuid,
-    pub amount:     u64,
+    pub debit_id: Uuid,
+    pub user_id: Uuid,
+    pub amount: u64,
     /// Absolute wall-clock deadline; once `Utc::now() >= expires_at` the debit
     /// is abandoned and a `DebitFailed` event is emitted.
     pub expires_at: DateTime<Utc>,
@@ -95,8 +108,7 @@ pub struct PendingDebit {
 /// the store is automatically bounded in memory.
 #[derive(Debug, Clone)]
 pub struct PendingEvent {
-    pub id:      Uuid,
-    pub topic:   String,
+    pub id: Uuid,
+    pub topic: String,
     pub payload: serde_json::Value,
 }
-

@@ -13,16 +13,16 @@
 //! | [`handlers`]       | Actix-web HTTP handlers and route config              |
 //! | [`subscriptions`]  | Broker traits and subscription wiring                 |
 
-pub mod event_store;
+//pub mod event_store;
 pub mod handlers;
 pub mod models;
 pub mod pending_store;
 pub mod repository;
 pub mod service;
 pub mod subscriptions;
-
+pub mod event_store;
 // Convenience re-exports for the most commonly referenced types.
-pub use event_store::{EventStore, MokaEventStore};
+//pub use event_store::{EventStore, MokaEventStore};
 pub use handlers::{configure, AppState};
 pub use models::{
     CreditRequest, DebitFailed, DebitFailureReason, DebitRequest, DebitSuccess, PendingDebit,
@@ -31,5 +31,4 @@ pub use models::{
 pub use pending_store::{MokaPendingDebitStore, PendingDebitStore};
 pub use repository::{PaymentRepository, SqliteRepository};
 pub use service::PaymentService;
-pub use subscriptions::{register_subscriptions, DebitRequestHandler, EventPublisher, EventSubscriber};
-
+pub use subscriptions::{register_subscriptions};
