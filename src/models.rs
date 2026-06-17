@@ -101,14 +101,3 @@ pub struct PendingDebit {
     pub expires_at: DateTime<Utc>,
 }
 
-/// A single event waiting to be published to the message broker.
-///
-/// Stored in the Moka event store instead of an outbox database table so that
-/// publishing can proceed even while a database write is in flight, and so that
-/// the store is automatically bounded in memory.
-#[derive(Debug, Clone)]
-pub struct PendingEvent {
-    pub id: Uuid,
-    pub topic: String,
-    pub payload: serde_json::Value,
-}

@@ -13,42 +13,42 @@
 //! | [`handlers`]       | Actix-web HTTP handlers and route config              |
 //! | [`subscriptions`]  | Broker traits and subscription wiring                 |
 
-pub mod handlers;
-pub mod models;
-pub mod pending_store;
-pub mod repository;
-pub mod service;
-pub mod subscriptions;
+mod handlers;
+mod models;
+mod pending_store;
+mod repository;
+mod service;
+mod subscriptions;
 use std::sync::Arc;
 
 use actix_web::web::ServiceConfig;
 use event_stream::EventStream;
-pub use handlers::{AppState, configure};
-pub use models::{
-    CreditRequest, DebitFailed, DebitFailureReason, DebitRequest, DebitSuccess, PendingDebit,
-    PendingEvent,
-};
-pub use pending_store::{MokaPendingDebitStore, PendingDebitStore};
-pub use repository::{PaymentRepository, SqliteRepository};
-pub use service::PaymentService;
+use handlers::{AppState, configure};
 
-pub use subscriptions::register_subscriptions;
+use pending_store::MokaPendingDebitStore;
+use repository::SqliteRepository;
+use service::PaymentService;
+
+use subscriptions::register_subscriptions;
 
 pub struct Module {
     state: AppState<SqliteRepository, MokaPendingDebitStore>,
 }
 
 impl Module {
-    pub fn new(pool: sqlx::Pool<sqlx::Sqlite>, es: Arc<dyn EventStream>) -> Self {
+    pub async fn new(pool: sqlx::Pool<sqlx::Sqlite>, es: Arc<dyn EventStream>) -> Self {
         let repo = Arc::new(SqliteRepository::new(pool));
         let pending = Arc::new(MokaPendingDebitStore::new(1000));
         let svc = Arc::new(PaymentService::new(
             repo,
             pending,
-            es,
+            es.clone(),
             chrono::Duration::minutes(30),
         ));
-        let state = AppState { service: svc };
+        let state = AppState {
+            service: svc.clone(),
+        };
+        register_subscriptions(svc.clone(), es).await;
         Self { state }
     }
 

@@ -217,11 +217,3 @@ where
     }
 }
 
-// ---------------------------------------------------------------------------
-// Helper: shared application state type alias
-// ---------------------------------------------------------------------------
-
-/// Convenience alias for the concrete service used in Actix handlers.
-///
-/// Replace the type parameters with your chosen implementations.
-pub type SharedService<R, P> = Arc<PaymentService<R, P>>;
