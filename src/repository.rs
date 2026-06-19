@@ -1,17 +1,52 @@
 //! Durable storage abstraction and its SQLite implementation.
 //!
-//! The repository handles the three pieces of state that **must** survive a
+//! The repository handles the pieces of state that **must** survive a
 //! process restart:
 //! - account balances,
-//! - the processed-debit idempotency log,
+//! - the credit history (for statements),
+//! - the processed-debit idempotency log, which also doubles as the debit
+//!   history (for statements) since it already records amount, time, and
+//!   order_id at the moment a debit settles.
 //!
 //! Events that need to reach a broker are handled separately by
 //! [`crate::event_store`].
+//!
+//! # Schema additions
+//!
+//! This module assumes the following DDL exists alongside the existing
+//! `accounts` table (the project's `schema` module is not part of this
+//! review — add these wherever your migrations live):
+//!
+//! ```sql
+//! CREATE TABLE IF NOT EXISTS credits (
+//!     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+//!     user_id    TEXT    NOT NULL,
+//!     amount     INTEGER NOT NULL,
+//!     created_at TEXT    NOT NULL
+//! );
+//! CREATE INDEX IF NOT EXISTS idx_credits_user_time ON credits(user_id, created_at);
+//!
+//! CREATE TABLE IF NOT EXISTS processed_debits (
+//!     debit_id   TEXT PRIMARY KEY,
+//!     order_id   TEXT    NOT NULL,
+//!     user_id    TEXT    NOT NULL,
+//!     amount     INTEGER NOT NULL,
+//!     created_at TEXT    NOT NULL
+//! );
+//! CREATE INDEX IF NOT EXISTS idx_processed_debits_user_time ON processed_debits(user_id, created_at);
+//! ```
+//!
+//! If `processed_debits` already exists with just a `debit_id` primary key,
+//! this is a breaking migration (new NOT NULL columns) — backfill or widen
+//! with defaults as appropriate for your deployment.
 
 use anyhow::Result;
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
 use uuid::Uuid;
+
+use crate::models::LedgerEntry;
 
 // ---------------------------------------------------------------------------
 // Trait
@@ -21,7 +56,8 @@ use uuid::Uuid;
 #[async_trait]
 pub trait PaymentRepository: Send + Sync + 'static {
     /// Add `amount` to `user_id`'s balance, creating the account row if it
-    /// does not yet exist.
+    /// does not yet exist, and record a `credits` ledger row for `amount` at
+    /// the current time.
     async fn credit(&self, user_id: Uuid, amount: u64) -> Result<()>;
 
     /// Attempt to atomically deduct `amount` from `user_id`'s balance.
@@ -37,8 +73,23 @@ pub trait PaymentRepository: Send + Sync + 'static {
     /// Return `true` if `debit_id` has already been fully processed.
     async fn debit_processed(&self, debit_id: Uuid) -> Result<bool>;
 
-    /// Record `debit_id` as processed (idempotent — safe to call twice).
-    async fn mark_processed(&self, debit_id: Uuid) -> Result<()>;
+    /// Record `debit_id` as processed (idempotent — safe to call twice),
+    /// storing the details needed to reconstruct it in a statement.
+    async fn mark_processed(
+        &self,
+        debit_id: Uuid,
+        order_id: Uuid,
+        user_id: Uuid,
+        amount: u64,
+    ) -> Result<()>;
+
+    /// Return all balance-affecting entries (credits and settled debits) for
+    /// `user_id` at or after `since`, sorted newest first.
+    async fn statement(
+        &self,
+        user_id: Uuid,
+        since: DateTime<Utc>,
+    ) -> Result<Vec<LedgerEntry>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -65,6 +116,9 @@ impl PaymentRepository for SqliteRepository {
     async fn credit(&self, user_id: Uuid, amount: u64) -> Result<()> {
         let uid = user_id.to_string();
         let amt = amount as i64;
+        let now = Utc::now();
+
+        let mut tx = self.pool.begin().await?;
 
         sqlx::query(
             "INSERT INTO accounts (user_id, balance) VALUES (?, ?)
@@ -72,9 +126,17 @@ impl PaymentRepository for SqliteRepository {
         )
         .bind(&uid)
         .bind(amt)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
+        sqlx::query("INSERT INTO credits (user_id, amount, created_at) VALUES (?, ?, ?)")
+            .bind(&uid)
+            .bind(amt)
+            .bind(now.to_rfc3339())
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
         Ok(())
     }
 
@@ -137,14 +199,78 @@ impl PaymentRepository for SqliteRepository {
         Ok(row.0 != 0)
     }
 
-    async fn mark_processed(&self, debit_id: Uuid) -> Result<()> {
+    async fn mark_processed(
+        &self,
+        debit_id: Uuid,
+        order_id: Uuid,
+        user_id: Uuid,
+        amount: u64,
+    ) -> Result<()> {
         let did = debit_id.to_string();
+        let oid = order_id.to_string();
+        let uid = user_id.to_string();
+        let amt = amount as i64;
+        let now = Utc::now();
 
-        sqlx::query("INSERT OR IGNORE INTO processed_debits (debit_id) VALUES (?)")
-            .bind(&did)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "INSERT OR IGNORE INTO processed_debits
+                 (debit_id, order_id, user_id, amount, created_at)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(&did)
+        .bind(&oid)
+        .bind(&uid)
+        .bind(amt)
+        .bind(now.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
 
         Ok(())
     }
+
+    async fn statement(&self, user_id: Uuid, since: DateTime<Utc>) -> Result<Vec<LedgerEntry>> {
+        let uid = user_id.to_string();
+        let since_str = since.to_rfc3339();
+
+        let credit_rows: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT amount, created_at FROM credits
+             WHERE user_id = ? AND created_at >= ?",
+        )
+        .bind(&uid)
+        .bind(&since_str)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let debit_rows: Vec<(String, String, i64, String)> = sqlx::query_as(
+            "SELECT debit_id, order_id, amount, created_at FROM processed_debits
+             WHERE user_id = ? AND created_at >= ?",
+        )
+        .bind(&uid)
+        .bind(&since_str)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut entries = Vec::with_capacity(credit_rows.len() + debit_rows.len());
+
+        for (amount, created_at) in credit_rows {
+            entries.push(LedgerEntry::Credit {
+                amount: amount as u64,
+                at: DateTime::parse_from_rfc3339(&created_at)?.with_timezone(&Utc),
+            });
+        }
+
+        for (debit_id, order_id, amount, created_at) in debit_rows {
+            entries.push(LedgerEntry::Debit {
+                debit_id: Uuid::parse_str(&debit_id)?,
+                order_id: Uuid::parse_str(&order_id)?,
+                amount: amount as u64,
+                at: DateTime::parse_from_rfc3339(&created_at)?.with_timezone(&Utc),
+            });
+        }
+
+        entries.sort_by(|a, b| b.at().cmp(&a.at()));
+
+        Ok(entries)
+    }
 }
+

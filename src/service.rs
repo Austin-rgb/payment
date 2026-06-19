@@ -12,7 +12,8 @@ use tracing::{info, warn};
 
 use crate::{
     models::{
-        CreditRequest, DebitFailed, DebitFailureReason, DebitRequest, DebitSuccess, PendingDebit,
+        CreditRequest, DebitFailed, DebitFailureReason, DebitRequest, DebitSuccess, LedgerEntry,
+        PendingDebit,
     },
     pending_store::PendingDebitStore,
     repository::PaymentRepository,
@@ -104,6 +105,7 @@ where
 
         let failed = DebitFailed {
             debit_id: debit.debit_id,
+            order_id: debit.order_id,
             user_id: debit.user_id,
             amount: debit.amount,
             balance,
@@ -131,10 +133,13 @@ where
                 "debit success (resolved from pending)"
             );
             self.pending.remove(debit.debit_id).await;
-            self.repo.mark_processed(debit.debit_id).await?;
+            self.repo
+                .mark_processed(debit.debit_id, debit.order_id, debit.user_id, debit.amount)
+                .await?;
 
             let success = DebitSuccess {
                 debit_id: debit.debit_id,
+                order_id: debit.order_id,
                 user_id: debit.user_id,
                 amount: debit.amount,
             };
@@ -182,10 +187,13 @@ where
                 amount   = req.amount,
                 "debit success"
             );
-            self.repo.mark_processed(req.debit_id).await?;
+            self.repo
+                .mark_processed(req.debit_id, req.order_id, req.user_id, req.amount)
+                .await?;
 
             let success = DebitSuccess {
                 debit_id: req.debit_id,
+                order_id: req.order_id,
                 user_id: req.user_id,
                 amount: req.amount,
             };
@@ -200,6 +208,7 @@ where
             let expires_at = Utc::now() + self.maximum_wait;
             let pending = PendingDebit {
                 debit_id: req.debit_id,
+                order_id: req.order_id,
                 user_id: req.user_id,
                 amount: req.amount,
                 expires_at,
@@ -215,5 +224,20 @@ where
 
         Ok(())
     }
+
+    // -----------------------------------------------------------------------
+    // Statement
+    // -----------------------------------------------------------------------
+
+    /// Return `user_id`'s balance-affecting history (credits and settled
+    /// debits) since `since`, newest first.
+    pub async fn statement(
+        &self,
+        user_id: uuid::Uuid,
+        since: chrono::DateTime<Utc>,
+    ) -> Result<Vec<LedgerEntry>> {
+        self.repo.statement(user_id, since).await
+    }
 }
+
 

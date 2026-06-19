@@ -124,6 +124,7 @@ mod tests {
     fn make_pending(debit_id: Uuid, user_id: Uuid, amount: u64) -> PendingDebit {
         PendingDebit {
             debit_id,
+            order_id: Uuid::new_v4(),
             user_id,
             amount,
             expires_at: Utc::now() + chrono::Duration::seconds(60),
@@ -156,7 +157,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn multiple_debits_per_user() -> Result<()> {
+    async fn multiple_debits_per_user() {
         let store = MokaPendingDebitStore::new(128);
         let uid = Uuid::new_v4();
         let did1 = Uuid::new_v4();
@@ -171,7 +172,6 @@ mod tests {
         let remaining = store.pending_for_user(uid).await;
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].debit_id, did2);
-
-        Ok(())
     }
 }
+

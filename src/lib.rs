@@ -57,3 +57,4 @@ impl Module {
             .configure(configure::<SqliteRepository, MokaPendingDebitStore>);
     }
 }
+

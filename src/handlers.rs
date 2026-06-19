@@ -1,18 +1,20 @@
 //! Actix-web HTTP handlers for the payment service.
 //!
-//! Only one endpoint is exposed:
-//!
-//! | Method | Path              | Body            | Description          |
-//! |--------|-------------------|-----------------|----------------------|
-//! | POST   | `/payment/credit` | [`CreditRequest`] | Credit a user account |
+//! | Method | Path                              | Body/Query             | Description            |
+//! |--------|-----------------------------------|-------------------------|------------------------|
+//! | POST   | `/payment/credit`                 | [`CreditRequest`]       | Credit a user account  |
+//! | GET    | `/payment/statement/{user_id}`    | `?since=<RFC3339>`      | Get a user's statement |
 
 use std::sync::Arc;
 
 use actix_web::{HttpResponse, web};
 use tracing::error;
+use uuid::Uuid;
 
 use crate::{
-    models::CreditRequest, pending_store::PendingDebitStore, repository::PaymentRepository,
+    models::{CreditRequest, StatementQuery, StatementResponse},
+    pending_store::PendingDebitStore,
+    repository::PaymentRepository,
     service::PaymentService,
 };
 
@@ -53,6 +55,40 @@ where
 }
 
 // ---------------------------------------------------------------------------
+// Statement endpoint
+// ---------------------------------------------------------------------------
+
+/// `GET /payment/statement/{user_id}?since=<RFC3339 timestamp>`
+///
+/// Returns the user's balance-affecting history (credits and settled debits)
+/// at or after `since`, sorted newest first. Pending (not-yet-settled)
+/// debits are not included.
+///
+/// - `200 OK` with [`StatementResponse`] on success,
+/// - `400 Bad Request` if `since` is missing or malformed (handled by Actix's
+///   `Query` extractor before this function runs),
+/// - `500 Internal Server Error` on any other error.
+async fn get_statement<R, P>(
+    state: web::Data<AppState<R, P>>,
+    path: web::Path<Uuid>,
+    query: web::Query<StatementQuery>,
+) -> HttpResponse
+where
+    R: PaymentRepository,
+    P: PendingDebitStore,
+{
+    let user_id = path.into_inner();
+
+    match state.service.statement(user_id, query.since).await {
+        Ok(entries) => HttpResponse::Ok().json(StatementResponse { user_id, entries }),
+        Err(e) => {
+            error!(error = %e, %user_id, "GET /payment/statement failed");
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Route configuration
 // ---------------------------------------------------------------------------
 
@@ -70,5 +106,10 @@ where
     R: PaymentRepository,
     P: PendingDebitStore,
 {
-    cfg.service(web::scope("/payment").route("/credit", web::post().to(post_credit::<R, P>)));
+    cfg.service(
+        web::scope("/payment")
+            .route("/credit", web::post().to(post_credit::<R, P>))
+            .route("/statement/{user_id}", web::get().to(get_statement::<R, P>)),
+    );
 }
+

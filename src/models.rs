@@ -17,6 +17,55 @@ pub struct CreditRequest {
 }
 
 // ---------------------------------------------------------------------------
+// Statement
+// ---------------------------------------------------------------------------
+
+/// Query string for `GET /payment/statement/{user_id}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatementQuery {
+    /// Only entries at or after this timestamp are returned.
+    pub since: DateTime<Utc>,
+}
+
+/// One entry in a user's balance-affecting history.
+///
+/// Only events that actually changed the account balance appear here —
+/// pending (parked) debits are deliberately excluded since they have not yet
+/// settled.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum LedgerEntry {
+    Credit {
+        amount: u64,
+        at: DateTime<Utc>,
+    },
+    Debit {
+        debit_id: Uuid,
+        order_id: Uuid,
+        amount: u64,
+        at: DateTime<Utc>,
+    },
+}
+
+impl LedgerEntry {
+    /// Timestamp used to sort entries, newest first.
+    pub fn at(&self) -> DateTime<Utc> {
+        match self {
+            LedgerEntry::Credit { at, .. } => *at,
+            LedgerEntry::Debit { at, .. } => *at,
+        }
+    }
+}
+
+/// Response body for `GET /payment/statement/{user_id}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatementResponse {
+    pub user_id: Uuid,
+    /// Entries sorted by `at` descending (most recent first).
+    pub entries: Vec<LedgerEntry>,
+}
+
+// ---------------------------------------------------------------------------
 // Domain events (inbound)
 // ---------------------------------------------------------------------------
 
@@ -28,6 +77,7 @@ pub struct CreditRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebitRequest {
     pub debit_id: Uuid,
+    pub order_id: Uuid,
     pub user_id: Uuid,
     pub amount: u64,
 }
@@ -44,6 +94,7 @@ impl Subscribable for DebitRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebitSuccess {
     pub debit_id: Uuid,
+    pub order_id: Uuid,
     pub user_id: Uuid,
     pub amount: u64,
 }
@@ -61,6 +112,7 @@ impl Publishable for DebitSuccess {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebitFailed {
     pub debit_id: Uuid,
+    pub order_id: Uuid,
     pub user_id: Uuid,
     pub amount: u64,
     /// Balance at the instant of failure — not necessarily zero.
@@ -94,10 +146,12 @@ pub enum DebitFailureReason {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingDebit {
     pub debit_id: Uuid,
+    pub order_id: Uuid,
     pub user_id: Uuid,
     pub amount: u64,
     /// Absolute wall-clock deadline; once `Utc::now() >= expires_at` the debit
     /// is abandoned and a `DebitFailed` event is emitted.
     pub expires_at: DateTime<Utc>,
 }
+
 
