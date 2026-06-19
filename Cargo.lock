@@ -3461,3 +3461,7 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "actixutils"
+version = "0.1.0"

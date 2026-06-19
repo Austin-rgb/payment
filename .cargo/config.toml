@@ -1,0 +1,6 @@
+[patch."https://github.com/Austin-rgb/event-stream"]
+event-stream = { path = "../event-stream" }
+
+[patch."https://github.com/Austin-rgb/actixutils"]
+actixutils = { path = "../actixutils" }
+
