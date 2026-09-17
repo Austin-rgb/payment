@@ -1,7 +1,7 @@
 //! Data models shared across the payment service.
 
 use chrono::{DateTime, Utc};
-use event_stream::{Publishable, Subscribable};
+use typed_eventbus::{Publishable, Subscribable};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

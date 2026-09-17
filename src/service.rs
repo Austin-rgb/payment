@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::Utc;
-use event_stream::{Event, EventMetaData, EventStream};
 use tracing::{info, warn};
+use typed_eventbus::{Event, EventStream};
 
 use crate::{
     models::{
@@ -112,8 +112,7 @@ where
             reason: DebitFailureReason::MaximumWaitExceeded,
         };
 
-        let emd = EventMetaData::new("payment");
-        let event = Event::new(emd, failed);
+        let event = Event::new(failed).with_producer("payment");
         if let Err(e) = event.publish(self.es.clone()).await {
             tracing::error!("Failed to publish event: {e}");
         };
@@ -143,8 +142,8 @@ where
                 user_id: debit.user_id,
                 amount: debit.amount,
             };
-            let emd = EventMetaData::new("payment");
-            let event = Event::new(emd, success);
+
+            let event = Event::new(success).with_producer("paymemt");
             if let Err(e) = event.publish(self.es.clone()).await {
                 tracing::error!("Failed to publish event: {e}");
             };
@@ -198,8 +197,7 @@ where
                 amount: req.amount,
             };
 
-            let emd = EventMetaData::new("payment");
-            let event = Event::new(emd, success);
+            let event = Event::new(success).with_producer("payment");
             if let Err(e) = event.publish(self.es.clone()).await {
                 tracing::error!("Failed to publish event: {e}");
             };
@@ -239,5 +237,3 @@ where
         self.repo.statement(user_id, since).await
     }
 }
-
-

@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use event_stream::{EventStream, Subscriber};
+use typed_eventbus::{EventStream, Subscriber};
 
 use crate::{
     models::DebitRequest, pending_store::PendingDebitStore, repository::PaymentRepository,
@@ -43,7 +43,7 @@ struct PaymentSubscriber<R, P> {
 impl<R: PaymentRepository + Send + Sync + 'static, P: PendingDebitStore + Send + Sync + 'static>
     Subscriber<DebitRequest> for PaymentSubscriber<R, P>
 {
-    async fn on_message(&self, event: event_stream::Event<DebitRequest>, _subject: &str) {
+    async fn on_message(&self, event: typed_eventbus::Event<DebitRequest>, _subject: &str) {
         if let Err(e) = self
             .service
             .clone()

@@ -22,7 +22,7 @@ mod subscriptions;
 use std::sync::Arc;
 
 use actix_web::web::ServiceConfig;
-use event_stream::EventStream;
+use typed_eventbus::EventStream;
 use handlers::{AppState, configure};
 
 use pending_store::MokaPendingDebitStore;

@@ -18,4 +18,4 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 uuid = { version = "1.23.2", features = ["serde"] }
 
-event-stream = { path = "../event-stream" }
+typed-eventbus = { version = "0.2" }
