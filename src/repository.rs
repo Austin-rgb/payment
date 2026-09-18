@@ -1,4 +1,4 @@
-//! Durable storage abstraction and its SQLite implementation.
+//! Durable storage abstraction and its Postgres implementation.
 //!
 //! The repository handles the pieces of state that **must** survive a
 //! process restart:
@@ -8,42 +8,54 @@
 //!   history (for statements) since it already records amount, time, and
 //!   order_id at the moment a debit settles.
 //!
-//! Events that need to reach a broker are handled separately by
-//! [`crate::event_store`].
+//! Events that need to reach a broker are handled separately (see
+//! [`crate::subscriptions`] / [`typed_eventbus`]).
 //!
-//! # Schema additions
+//! # Schema
 //!
-//! This module assumes the following DDL exists alongside the existing
-//! `accounts` table (the project's `schema` module is not part of this
-//! review — add these wherever your migrations live):
+//! This module assumes the DDL under `migrations/` has been applied
+//! (`sqlx migrate run`):
 //!
 //! ```sql
-//! CREATE TABLE IF NOT EXISTS credits (
-//!     id         INTEGER PRIMARY KEY AUTOINCREMENT,
-//!     user_id    TEXT    NOT NULL,
-//!     amount     INTEGER NOT NULL,
-//!     created_at TEXT    NOT NULL
+//! CREATE TABLE IF NOT EXISTS accounts (
+//!     id      UUID PRIMARY KEY,
+//!     balance BIGINT NOT NULL DEFAULT 0 CHECK (balance >= 0)
 //! );
-//! CREATE INDEX IF NOT EXISTS idx_credits_user_time ON credits(user_id, created_at);
+//!
+//! CREATE TABLE IF NOT EXISTS credits (
+//!     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+//!     user_id    UUID NOT NULL REFERENCES accounts(id),
+//!     amount     BIGINT NOT NULL CHECK (amount >= 0),
+//!     created    TIMESTAMPTZ NOT NULL DEFAULT now()
+//! );
+//! CREATE INDEX IF NOT EXISTS idx_credits_user_created ON credits(user_id, created);
 //!
 //! CREATE TABLE IF NOT EXISTS processed_debits (
-//!     debit_id   TEXT PRIMARY KEY,
-//!     order_id   TEXT    NOT NULL,
-//!     user_id    TEXT    NOT NULL,
-//!     amount     INTEGER NOT NULL,
-//!     created_at TEXT    NOT NULL
+//!     id         UUID PRIMARY KEY,
+//!     order_id   UUID NOT NULL,
+//!     user_id    UUID NOT NULL REFERENCES accounts(id),
+//!     amount     BIGINT NOT NULL CHECK (amount >= 0),
+//!     created    TIMESTAMPTZ NOT NULL DEFAULT now()
 //! );
-//! CREATE INDEX IF NOT EXISTS idx_processed_debits_user_time ON processed_debits(user_id, created_at);
+//! CREATE INDEX IF NOT EXISTS idx_processed_debits_user_created ON processed_debits(user_id, created);
 //! ```
 //!
-//! If `processed_debits` already exists with just a `debit_id` primary key,
-//! this is a breaking migration (new NOT NULL columns) — backfill or widen
-//! with defaults as appropriate for your deployment.
+//! Unlike SQLite, Postgres has native `UUID` and `TIMESTAMPTZ` column types,
+//! so — compared to the previous SQLite-backed implementation — this module
+//! no longer round-trips ids/timestamps through strings; `sqlx` maps
+//! [`Uuid`] and [`DateTime<Utc>`] directly.
+//!
+//! As with the previous SQLite implementation, queries here use
+//! `sqlx::query` / `sqlx::query_as` (dynamic queries) rather than the
+//! `query!`/`query_as!` macros, so building this crate does not require a
+//! live database connection (or a `.sqlx` offline cache) — only the
+//! `viewset`-backed admin CRUD in [`crate::admin`] uses `sqlx`'s
+//! `FromRow`-derived, reflection-style mapping.
 
-use anyhow::Result;
+use crate::errors::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::models::LedgerEntry;
@@ -64,7 +76,7 @@ pub trait PaymentRepository: Send + Sync + 'static {
     ///
     /// Returns `true` when the debit succeeded, `false` when the balance was
     /// insufficient. This method is **not** idempotent on its own; callers
-    /// must check [`debit_processed`] first.
+    /// must check [`PaymentRepository::debit_processed`] first.
     async fn try_debit(&self, user_id: Uuid, amount: u64) -> Result<bool>;
 
     /// Return the current balance for `user_id`, or `0` if no account exists.
@@ -85,54 +97,48 @@ pub trait PaymentRepository: Send + Sync + 'static {
 
     /// Return all balance-affecting entries (credits and settled debits) for
     /// `user_id` at or after `since`, sorted newest first.
-    async fn statement(
-        &self,
-        user_id: Uuid,
-        since: DateTime<Utc>,
-    ) -> Result<Vec<LedgerEntry>>;
+    async fn statement(&self, user_id: Uuid, since: DateTime<Utc>) -> Result<Vec<LedgerEntry>>;
 }
 
 // ---------------------------------------------------------------------------
-// SQLite implementation
+// Postgres implementation
 // ---------------------------------------------------------------------------
 
-/// [`PaymentRepository`] backed by a SQLite database via `sqlx`.
+/// [`PaymentRepository`] backed by a Postgres database via `sqlx`.
 ///
-/// All queries use `sqlx::query` / `sqlx::query_as` (dynamic queries) rather
-/// than the `query!` macro so that no compile-time database connection is
+/// Replaces the previous `SqliteRepository`. All queries use `sqlx::query` /
+/// `sqlx::query_as` (dynamic queries, `$n`-style placeholders) rather than
+/// the `query!` macro so that no compile-time database connection is
 /// required.
-pub struct SqliteRepository {
-    pool: SqlitePool,
+pub struct PostgresRepository {
+    pool: PgPool,
 }
 
-impl SqliteRepository {
-    pub fn new(pool: SqlitePool) -> Self {
+impl PostgresRepository {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
 
 #[async_trait]
-impl PaymentRepository for SqliteRepository {
+impl PaymentRepository for PostgresRepository {
     async fn credit(&self, user_id: Uuid, amount: u64) -> Result<()> {
-        let uid = user_id.to_string();
         let amt = amount as i64;
-        let now = Utc::now();
 
         let mut tx = self.pool.begin().await?;
 
         sqlx::query(
-            "INSERT INTO accounts (user_id, balance) VALUES (?, ?)
-             ON CONFLICT(user_id) DO UPDATE SET balance = balance + excluded.balance",
+            "INSERT INTO accounts (id, balance) VALUES ($1, $2)
+             ON CONFLICT (id) DO UPDATE SET balance = accounts.balance + EXCLUDED.balance",
         )
-        .bind(&uid)
+        .bind(user_id)
         .bind(amt)
         .execute(&mut *tx)
         .await?;
 
-        sqlx::query("INSERT INTO credits (user_id, amount, created_at) VALUES (?, ?, ?)")
-            .bind(&uid)
+        sqlx::query("INSERT INTO credits (user_id, amount) VALUES ($1, $2)")
+            .bind(user_id)
             .bind(amt)
-            .bind(now.to_rfc3339())
             .execute(&mut *tx)
             .await?;
 
@@ -141,16 +147,20 @@ impl PaymentRepository for SqliteRepository {
     }
 
     async fn try_debit(&self, user_id: Uuid, amount: u64) -> Result<bool> {
-        let uid = user_id.to_string();
         let amt = amount as i64;
 
         let mut tx = self.pool.begin().await?;
 
-        // Read current balance inside the transaction.
-        let row: Option<(i64,)> = sqlx::query_as("SELECT balance FROM accounts WHERE user_id = ?")
-            .bind(&uid)
-            .fetch_optional(&mut *tx)
-            .await?;
+        // `FOR UPDATE` locks the row for the remainder of the transaction so
+        // two concurrent debits against the same account can't both read the
+        // same balance and both succeed — a guarantee SQLite's
+        // whole-database write lock gave us "for free" but that Postgres
+        // needs an explicit row lock for under `READ COMMITTED`.
+        let row: Option<(i64,)> =
+            sqlx::query_as("SELECT balance FROM accounts WHERE id = $1 FOR UPDATE")
+                .bind(user_id)
+                .fetch_optional(&mut *tx)
+                .await?;
 
         let balance = match row {
             Some((b,)) => b,
@@ -165,9 +175,9 @@ impl PaymentRepository for SqliteRepository {
             return Ok(false);
         }
 
-        sqlx::query("UPDATE accounts SET balance = balance - ? WHERE user_id = ?")
+        sqlx::query("UPDATE accounts SET balance = balance - $1 WHERE id = $2")
             .bind(amt)
-            .bind(&uid)
+            .bind(user_id)
             .execute(&mut *tx)
             .await?;
 
@@ -176,10 +186,8 @@ impl PaymentRepository for SqliteRepository {
     }
 
     async fn balance(&self, user_id: Uuid) -> Result<u64> {
-        let uid = user_id.to_string();
-
-        let row: Option<(i64,)> = sqlx::query_as("SELECT balance FROM accounts WHERE user_id = ?")
-            .bind(&uid)
+        let row: Option<(i64,)> = sqlx::query_as("SELECT balance FROM accounts WHERE id = $1")
+            .bind(user_id)
             .fetch_optional(&self.pool)
             .await?;
 
@@ -187,16 +195,13 @@ impl PaymentRepository for SqliteRepository {
     }
 
     async fn debit_processed(&self, debit_id: Uuid) -> Result<bool> {
-        let did = debit_id.to_string();
-
-        // SQLite returns 0 or 1 for EXISTS; fetch as i64 to avoid driver quirks.
-        let row: (i64,) =
-            sqlx::query_as("SELECT EXISTS( SELECT 1 FROM processed_debits WHERE debit_id = ? )")
-                .bind(&did)
+        let exists: bool =
+            sqlx::query_scalar("SELECT EXISTS( SELECT 1 FROM processed_debits WHERE id = $1 )")
+                .bind(debit_id)
                 .fetch_one(&self.pool)
                 .await?;
 
-        Ok(row.0 != 0)
+        Ok(exists)
     }
 
     async fn mark_processed(
@@ -206,22 +211,17 @@ impl PaymentRepository for SqliteRepository {
         user_id: Uuid,
         amount: u64,
     ) -> Result<()> {
-        let did = debit_id.to_string();
-        let oid = order_id.to_string();
-        let uid = user_id.to_string();
         let amt = amount as i64;
-        let now = Utc::now();
 
         sqlx::query(
-            "INSERT OR IGNORE INTO processed_debits
-                 (debit_id, order_id, user_id, amount, created_at)
-             VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO processed_debits (id, order_id, user_id, amount)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (id) DO NOTHING",
         )
-        .bind(&did)
-        .bind(&oid)
-        .bind(&uid)
+        .bind(debit_id)
+        .bind(order_id)
+        .bind(user_id)
         .bind(amt)
-        .bind(now.to_rfc3339())
         .execute(&self.pool)
         .await?;
 
@@ -229,42 +229,39 @@ impl PaymentRepository for SqliteRepository {
     }
 
     async fn statement(&self, user_id: Uuid, since: DateTime<Utc>) -> Result<Vec<LedgerEntry>> {
-        let uid = user_id.to_string();
-        let since_str = since.to_rfc3339();
-
-        let credit_rows: Vec<(i64, String)> = sqlx::query_as(
-            "SELECT amount, created_at FROM credits
-             WHERE user_id = ? AND created_at >= ?",
+        let credit_rows: Vec<(i64, DateTime<Utc>)> = sqlx::query_as(
+            "SELECT amount, created FROM credits
+             WHERE user_id = $1 AND created >= $2",
         )
-        .bind(&uid)
-        .bind(&since_str)
+        .bind(user_id)
+        .bind(since)
         .fetch_all(&self.pool)
         .await?;
 
-        let debit_rows: Vec<(String, String, i64, String)> = sqlx::query_as(
-            "SELECT debit_id, order_id, amount, created_at FROM processed_debits
-             WHERE user_id = ? AND created_at >= ?",
+        let debit_rows: Vec<(Uuid, Uuid, i64, DateTime<Utc>)> = sqlx::query_as(
+            "SELECT id, order_id, amount, created FROM processed_debits
+             WHERE user_id = $1 AND created >= $2",
         )
-        .bind(&uid)
-        .bind(&since_str)
+        .bind(user_id)
+        .bind(since)
         .fetch_all(&self.pool)
         .await?;
 
         let mut entries = Vec::with_capacity(credit_rows.len() + debit_rows.len());
 
-        for (amount, created_at) in credit_rows {
+        for (amount, created) in credit_rows {
             entries.push(LedgerEntry::Credit {
                 amount: amount as u64,
-                at: DateTime::parse_from_rfc3339(&created_at)?.with_timezone(&Utc),
+                at: created,
             });
         }
 
-        for (debit_id, order_id, amount, created_at) in debit_rows {
+        for (debit_id, order_id, amount, created) in debit_rows {
             entries.push(LedgerEntry::Debit {
-                debit_id: Uuid::parse_str(&debit_id)?,
-                order_id: Uuid::parse_str(&order_id)?,
+                debit_id,
+                order_id,
                 amount: amount as u64,
-                at: DateTime::parse_from_rfc3339(&created_at)?.with_timezone(&Utc),
+                at: created,
             });
         }
 
@@ -273,4 +270,3 @@ impl PaymentRepository for SqliteRepository {
         Ok(entries)
     }
 }
-

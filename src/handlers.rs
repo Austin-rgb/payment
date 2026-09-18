@@ -99,7 +99,7 @@ where
 /// ```rust,ignore
 /// App::new()
 ///     .app_data(web::Data::new(state))
-///     .configure(handlers::configure::<SqliteRepository, MokaPendingDebitStore, MokaEventStore>)
+///     .configure(handlers::configure::<PostgresRepository, CacheBackedPendingDebitStore>)
 /// ```
 pub fn configure<R, P>(cfg: &mut web::ServiceConfig)
 where

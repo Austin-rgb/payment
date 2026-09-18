@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use anyhow::Result;
+use actix_web::Result;
 use chrono::Utc;
 use tracing::{info, warn};
 use typed_eventbus::{Event, EventStream};
@@ -76,7 +76,7 @@ where
 
         self.repo.credit(req.user_id, req.amount).await?;
 
-        let pending_debits = self.pending.pending_for_user(req.user_id).await;
+        let pending_debits = self.pending.pending_for_user(req.user_id).await?;
 
         for debit in pending_debits {
             let now = Utc::now();
@@ -234,6 +234,6 @@ where
         user_id: uuid::Uuid,
         since: chrono::DateTime<Utc>,
     ) -> Result<Vec<LedgerEntry>> {
-        self.repo.statement(user_id, since).await
+        Ok(self.repo.statement(user_id, since).await?)
     }
 }

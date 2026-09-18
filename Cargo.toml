@@ -1,21 +1,25 @@
 [package]
 name = "payment"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
 actix-web = "4.13.0"
+actixutils = { version = "0.6.7" }
 anyhow = "1.0.102"
 async-trait = "0.1.89"
 chrono = { version = "0.4.45", features = ["serde"] }
+dotenvy = "0.15.7"
 futures = "0.3.32"
-moka = { version = "0.12.15", features = ["future"] }
-serde = "1.0.228"
+moka = { version = "0.12.16", features = ["future"] }
+serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
-sqlx = { version = "0.8.6", features = ["runtime-tokio", "sqlite"] }
-tokio = "1.52.3"
+sqlx = { version = "0.9", features = ["postgres", "tls-rustls", "macros", "runtime-tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-uuid = { version = "1.23.2", features = ["serde"] }
+uuid = { version = "1.23.2", features = ["v4", "serde"] }
+viewset = { version = "0.4.2" }
 
 typed-eventbus = { version = "0.2" }
+thiserror = "2.0.20"
