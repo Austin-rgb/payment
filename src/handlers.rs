@@ -112,4 +112,3 @@ where
             .route("/statement/{user_id}", web::get().to(get_statement::<R, P>)),
     );
 }
-

@@ -43,7 +43,11 @@ struct PaymentSubscriber<R, P> {
 impl<R: PaymentRepository + Send + Sync + 'static, P: PendingDebitStore + Send + Sync + 'static>
     Subscriber<DebitRequest> for PaymentSubscriber<R, P>
 {
-    async fn on_message(&self, event: typed_eventbus::Event<DebitRequest>, _subject: &str) {
+    async fn on_message(
+        &self,
+        event: typed_eventbus::Event<DebitRequest>,
+        _subject: &str,
+    ) -> Result<(), typed_eventbus::EventError> {
         if let Err(e) = self
             .service
             .clone()
@@ -52,6 +56,6 @@ impl<R: PaymentRepository + Send + Sync + 'static, P: PendingDebitStore + Send +
         {
             tracing::error!("Error in handling debit request: {e}");
         };
+        Ok(())
     }
 }
-

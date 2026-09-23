@@ -22,4 +22,4 @@ impl ResponseError for ApiError {
     }
 }
 
-pub type Result<T> = std::result::Result<T,ApiError>;
+pub type Result<T> = std::result::Result<T, ApiError>;

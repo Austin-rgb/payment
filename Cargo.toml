@@ -5,12 +5,13 @@ edition = "2024"
 
 [dependencies]
 actix-web = "4.13.0"
-actixutils = { version = "0.6.7" }
+actixutils = { version = "0.6.8", features = ["redis"] }
 anyhow = "1.0.102"
 async-trait = "0.1.89"
 chrono = { version = "0.4.45", features = ["serde"] }
 dotenvy = "0.15.7"
 futures = "0.3.32"
+infra = { path = "../infra" }
 moka = { version = "0.12.16", features = ["future"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
@@ -21,5 +22,5 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 uuid = { version = "1.23.2", features = ["v4", "serde"] }
 viewset = { version = "0.4.2" }
 
-typed-eventbus = { version = "0.2" }
+typed-eventbus = { path = "../event-stream" }
 thiserror = "2.0.20"

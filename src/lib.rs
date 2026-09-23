@@ -37,13 +37,14 @@
 //! they were (no session requirement), since they are called by other
 //! internal systems rather than end users.
 mod admin;
+mod errors;
 mod handlers;
 mod models;
 mod pending_store;
 mod repository;
 mod service;
 mod subscriptions;
-mod errors;
+use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -77,15 +78,17 @@ use subscriptions::register_subscriptions;
 ///
 /// Implementations decide the storage backend (in-process, Redis, etc.) and
 /// whatever sharing/eviction policy makes sense for it; callers only see the
-/// [`actixutils::Store`] trait object. See the module-level docs for why
-/// this crate defines its own copy of this trait rather than reusing
-/// `groups::CacheFactory`.
-pub trait CacheFactory: Clone + Send + Sync + 'static {
-    fn new_cache<K, V>(&self, name: &str, ttl: Duration) -> Arc<dyn Store<K, V>>
-    where
-        K: Hash + Eq + Clone + Send + Sync + 'static,
-        V: Clone + Send + Sync + 'static;
-}
+/// [`actixutils::Store`] trait object.
+///
+/// This used to be its own copy of the trait (see the module-level docs'
+/// original reasoning about not reusing `groups::CacheFactory`) — but it was
+/// structurally identical to [`actixutils::locals::CacheFactory`] and
+/// nominally distinct from it, so a `redis::aio::ConnectionManager` (which
+/// implements the `actixutils` trait, see its `redis` feature) couldn't be
+/// passed in directly. Re-exporting the `actixutils` trait instead means
+/// `main.rs` can hand `Module::new` the `ConnectionManager` from
+/// `infra::Infrastructure` with no adapter.
+pub use actixutils::locals::CacheFactory;
 
 /// [`CacheFactory`] backed by in-process [`moka`] caches, keyed by `name` so
 /// that repeated calls for the same logical cache name return the *same*
@@ -107,10 +110,14 @@ pub struct MokaCacheFactory {
 }
 
 impl CacheFactory for MokaCacheFactory {
+    // Bounds match `actixutils::locals::CacheFactory::new_cache` exactly
+    // (Serialize/DeserializeOwned included) even though this in-process
+    // moka cache never (de)serializes anything, so every K/V usable with
+    // the Redis-backed factory in production is also usable here in tests.
     fn new_cache<K, V>(&self, name: &str, _ttl: Duration) -> Arc<dyn Store<K, V>>
     where
-        K: Hash + Eq + Clone + Send + Sync + 'static,
-        V: Clone + Send + Sync + 'static,
+        K: Hash + Eq + Clone + serde::Serialize + Send + Sync + 'static,
+        V: Clone + serde::Serialize + serde::de::DeserializeOwned + Send + Sync + 'static,
     {
         let mut registry = self.registry.lock().expect("cache registry lock poisoned");
 
@@ -146,7 +153,7 @@ impl CacheFactory for MokaCacheFactory {
 /// `session` cookie by `RequiredSession::<AuthSession>` in
 /// [`Module::config`]. Field-for-field identical to `contributions`' (and
 /// `groups`') own (private) `AuthSession`.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct AuthSession {
     /// The authenticated user's id ("subject").
     #[allow(dead_code)]
@@ -172,7 +179,12 @@ impl Principal for AuthSession {
 ///
 /// Construct one with [`Module::new`] and mount it with [`Module::config`]
 /// inside `App::new().configure(...)`.
-pub struct Module<Cf: CacheFactory + 'static> {
+// `+ Clone` is explicit here now: it used to come from the (removed) local
+// `CacheFactory: Clone + Send + Sync + 'static` supertrait —
+// `actixutils::locals::CacheFactory` requires neither `Clone` nor
+// `Send + Sync + 'static`, and `Module::new` below does `cf.clone()`
+// three times and stores `cf` across await points.
+pub struct Module<Cf: CacheFactory + Clone + Send + Sync + 'static> {
     state: Arc<AppState<PostgresRepository, CacheBackedPendingDebitStore>>,
     accounts: Arc<AccountRepository>,
     credits: Arc<CreditRepository>,
@@ -184,7 +196,7 @@ pub struct Module<Cf: CacheFactory + 'static> {
     permissions: PermissionSet,
 }
 
-impl<Cf: CacheFactory + 'static> Module<Cf> {
+impl<Cf: CacheFactory + Clone + Send + Sync + 'static> Module<Cf> {
     /// Builds a new [`Module`]:
     /// - constructs [`PostgresRepository`] and a [`CacheBackedPendingDebitStore`]
     ///   (via `cf`) and wires them into a [`PaymentService`] with a 30-minute

@@ -1,8 +1,8 @@
 //! Data models shared across the payment service.
 
 use chrono::{DateTime, Utc};
-use typed_eventbus::{Publishable, Subscribable};
 use serde::{Deserialize, Serialize};
+use typed_eventbus::EventType;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -82,7 +82,7 @@ pub struct DebitRequest {
     pub amount: u64,
 }
 
-impl Subscribable for DebitRequest {
+impl EventType for DebitRequest {
     const SUBJECT: &'static str = "payment.debit.request";
 }
 
@@ -99,7 +99,7 @@ pub struct DebitSuccess {
     pub amount: u64,
 }
 
-impl Publishable for DebitSuccess {
+impl EventType for DebitSuccess {
     const SUBJECT: &'static str = "payment.debit.success";
 }
 
@@ -120,7 +120,7 @@ pub struct DebitFailed {
     pub reason: DebitFailureReason,
 }
 
-impl Publishable for DebitFailed {
+impl EventType for DebitFailed {
     const SUBJECT: &'static str = "payment.debit.failed";
 }
 
@@ -153,5 +153,3 @@ pub struct PendingDebit {
     /// is abandoned and a `DebitFailed` event is emitted.
     pub expires_at: DateTime<Utc>,
 }
-
-
