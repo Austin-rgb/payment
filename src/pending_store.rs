@@ -93,7 +93,7 @@ impl PendingDebitStore for CacheBackedPendingDebitStore {
         let debit_id = pending.debit_id;
         let user_id = pending.user_id;
 
-        self.debits.set(&debit_id, pending).await;
+        self.debits.set(&debit_id, pending).await?;
 
         // Append debit_id to the user's index list.
         let mut ids = self.user_index.get(&user_id).await?.unwrap_or_default();
@@ -101,7 +101,7 @@ impl PendingDebitStore for CacheBackedPendingDebitStore {
         if !ids.contains(&debit_id) {
             ids.push(debit_id);
         }
-        self.user_index.set(&user_id, ids).await;
+        self.user_index.set(&user_id, ids).await?;
         Ok(())
     }
 

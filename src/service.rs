@@ -101,7 +101,7 @@ where
         );
 
         let balance = self.repo.balance(debit.user_id).await?;
-        self.pending.remove(debit.debit_id).await;
+        self.pending.remove(debit.debit_id).await?;
 
         let failed = DebitFailed {
             debit_id: debit.debit_id,
@@ -131,7 +131,7 @@ where
                 amount   = debit.amount,
                 "debit success (resolved from pending)"
             );
-            self.pending.remove(debit.debit_id).await;
+            self.pending.remove(debit.debit_id).await?;
             self.repo
                 .mark_processed(debit.debit_id, debit.order_id, debit.user_id, debit.amount)
                 .await?;
@@ -217,7 +217,7 @@ where
                 expires_at = %expires_at,
                 "pending debit queued"
             );
-            self.pending.add(pending).await;
+            self.pending.add(pending).await?;
         }
 
         Ok(())
