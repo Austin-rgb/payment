@@ -1,0 +1,94 @@
+{
+  "permissions": [
+    {
+      "method": "GET",
+      "url": "/api/payment/admin/accounts",
+      "bit_id": 40
+    },
+    {
+      "method": "POST",
+      "url": "/api/payment/admin/accounts",
+      "bit_id": 41
+    },
+    {
+      "method": "GET",
+      "url": "/api/payment/admin/accounts/{id}",
+      "bit_id": 40
+    },
+    {
+      "method": "PUT",
+      "url": "/api/payment/admin/accounts/{id}",
+      "bit_id": 41
+    },
+    {
+      "method": "PATCH",
+      "url": "/api/payment/admin/accounts/{id}",
+      "bit_id": 41
+    },
+    {
+      "method": "DELETE",
+      "url": "/api/payment/admin/accounts/{id}",
+      "bit_id": 41
+    },
+    {
+      "method": "GET",
+      "url": "/api/payment/admin/credits",
+      "bit_id": 40
+    },
+    {
+      "method": "POST",
+      "url": "/api/payment/admin/credits",
+      "bit_id": 41
+    },
+    {
+      "method": "GET",
+      "url": "/api/payment/admin/credits/{id}",
+      "bit_id": 40
+    },
+    {
+      "method": "PUT",
+      "url": "/api/payment/admin/credits/{id}",
+      "bit_id": 41
+    },
+    {
+      "method": "PATCH",
+      "url": "/api/payment/admin/credits/{id}",
+      "bit_id": 41
+    },
+    {
+      "method": "DELETE",
+      "url": "/api/payment/admin/credits/{id}",
+      "bit_id": 41
+    },
+    {
+      "method": "GET",
+      "url": "/api/payment/admin/processed-debits",
+      "bit_id": 40
+    },
+    {
+      "method": "POST",
+      "url": "/api/payment/admin/processed-debits",
+      "bit_id": 41
+    },
+    {
+      "method": "GET",
+      "url": "/api/payment/admin/processed-debits/{id}",
+      "bit_id": 40
+    },
+    {
+      "method": "PUT",
+      "url": "/api/payment/admin/processed-debits/{id}",
+      "bit_id": 41
+    },
+    {
+      "method": "PATCH",
+      "url": "/api/payment/admin/processed-debits/{id}",
+      "bit_id": 41
+    },
+    {
+      "method": "DELETE",
+      "url": "/api/payment/admin/processed-debits/{id}",
+      "bit_id": 41
+    }
+  ]
+}

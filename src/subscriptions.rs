@@ -1,61 +1,49 @@
-//! Event broker abstractions and subscription wiring.
-//!
-//! No concrete broker is implemented here. Bring your own NATS / Redis /
-//! Kafka client and implement [`EventPublisher`] and [`EventSubscriber`] for
-//! it; then call [`register_subscriptions`] during startup.
+//! Event-stream wiring: subscribes the service to `payment.debit.request`.
 
 use std::sync::Arc;
 
-use typed_eventbus::{EventStream, Subscriber};
+use async_trait::async_trait;
+use ferrumec::event::EventError;
+use ferrumec::{Event, EventStream, Subscriber};
+use viewset::ApiError;
 
-use crate::{
-    models::DebitRequest, pending_store::PendingDebitStore, repository::PaymentRepository,
-    service::PaymentService,
-};
-// ---------------------------------------------------------------------------
-// Subscription wiring
-// ---------------------------------------------------------------------------
+use crate::models::DebitRequest;
+use crate::service::PaymentService;
 
-/// Subscribe `service` to the `payment.debit.request` topic via `subscriber`.
-///
-/// Each incoming event is deserialised as a [`DebitRequest`] and forwarded to
-/// [`PaymentService::handle_debit_request`]. Errors are logged and the event
-/// is dropped (no broker-level retry at this layer — rely on the broker's own
-/// redelivery policy and the service's idempotency guard).
-pub async fn register_subscriptions<R, P>(
-    service: Arc<PaymentService<R, P>>,
+/// Subscribe `service` to [`DebitRequest`] on `es`.
+pub async fn register(
+    service: Arc<PaymentService>,
     es: Arc<dyn EventStream>,
-) where
-    R: PaymentRepository,
-    P: PendingDebitStore,
-{
-    let subscriber = PaymentSubscriber { service };
-    if let Err(e) = subscriber.subscribe(es).await {
-        tracing::error!("Failed to subscribe to event stream: {e}");
-    };
+) -> Result<(), EventError> {
+    PaymentSubscriber { service }.subscribe(es).await
 }
 
-struct PaymentSubscriber<R, P> {
-    service: Arc<PaymentService<R, P>>,
+struct PaymentSubscriber {
+    service: Arc<PaymentService>,
 }
 
-#[async_trait::async_trait]
-impl<R: PaymentRepository + Send + Sync + 'static, P: PendingDebitStore + Send + Sync + 'static>
-    Subscriber<DebitRequest> for PaymentSubscriber<R, P>
-{
+#[async_trait]
+impl Subscriber<DebitRequest> for PaymentSubscriber {
+    /// Transient failures (database, cache, outbox) are returned as errors so an
+    /// at-least-once stream (`NatsAloStream`) redelivers; handling is idempotent
+    /// on `debit_id`, so redelivery is safe. Invalid requests can never succeed,
+    /// so they are logged and dropped instead of being redelivered forever.
     async fn on_message(
         &self,
-        event: typed_eventbus::Event<DebitRequest>,
+        event: Event<DebitRequest>,
         _subject: &str,
-    ) -> Result<(), typed_eventbus::EventError> {
-        if let Err(e) = self
-            .service
-            .clone()
-            .handle_debit_request(event.payload)
-            .await
-        {
-            tracing::error!("Error in handling debit request: {e}");
-        };
-        Ok(())
+    ) -> Result<(), EventError> {
+        let debit_id = event.payload.debit_id;
+        match self.service.handle_debit_request(event.payload).await {
+            Ok(()) => Ok(()),
+            Err(ApiError::Validation(msg)) => {
+                tracing::error!(%debit_id, "dropping invalid debit request: {msg}");
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!(%debit_id, error = %e, "debit request failed");
+                Err(Box::new(e))
+            }
+        }
     }
 }

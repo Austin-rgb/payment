@@ -1,37 +1,31 @@
-//! Data models shared across the payment service.
+//! Data models shared across the payment service: HTTP bodies, the statement
+//! types and the domain events carried on the ferrumec event stream.
 
 use chrono::{DateTime, Utc};
+use ferrumec::EventType;
 use serde::{Deserialize, Serialize};
-use typed_eventbus::EventType;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
-// HTTP request bodies
+// HTTP
 // ---------------------------------------------------------------------------
 
-/// JSON body for `POST /payment/credit`.
+/// JSON body for `POST /{namespace}/credit`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreditRequest {
     pub user_id: Uuid,
     pub amount: u64,
 }
 
-// ---------------------------------------------------------------------------
-// Statement
-// ---------------------------------------------------------------------------
-
-/// Query string for `GET /payment/statement/{user_id}`.
+/// Query string for `GET /{namespace}/statement/{user_id}`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatementQuery {
-    /// Only entries at or after this timestamp are returned.
+    /// Only entries at or after this timestamp are returned (RFC 3339).
     pub since: DateTime<Utc>,
 }
 
-/// One entry in a user's balance-affecting history.
-///
-/// Only events that actually changed the account balance appear here —
-/// pending (parked) debits are deliberately excluded since they have not yet
-/// settled.
+/// One entry in a user's balance-affecting history. Pending (parked) debits
+/// are deliberately excluded since they have not settled.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum LedgerEntry {
@@ -51,13 +45,12 @@ impl LedgerEntry {
     /// Timestamp used to sort entries, newest first.
     pub fn at(&self) -> DateTime<Utc> {
         match self {
-            LedgerEntry::Credit { at, .. } => *at,
-            LedgerEntry::Debit { at, .. } => *at,
+            LedgerEntry::Credit { at, .. } | LedgerEntry::Debit { at, .. } => *at,
         }
     }
 }
 
-/// Response body for `GET /payment/statement/{user_id}`.
+/// Response body for `GET /{namespace}/statement/{user_id}`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatementResponse {
     pub user_id: Uuid,
@@ -66,14 +59,14 @@ pub struct StatementResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Domain events (inbound)
+// Events (inbound)
 // ---------------------------------------------------------------------------
 
 /// Inbound event: a caller wants to debit a user's account.
 ///
-/// `debit_id` is a caller-supplied idempotency key. Once a debit with this ID
-/// has been processed (success **or** permanent failure), the ID is recorded in
-/// `processed_debits` so that re-delivered broker messages are silently ignored.
+/// `debit_id` is a caller-supplied idempotency key. Once a debit with this id
+/// has settled it is recorded in `processed_debits`, so re-delivered messages
+/// are recognised and ignored.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebitRequest {
     pub debit_id: Uuid,
@@ -87,10 +80,10 @@ impl EventType for DebitRequest {
 }
 
 // ---------------------------------------------------------------------------
-// Domain events (outbound)
+// Events (outbound)
 // ---------------------------------------------------------------------------
 
-/// Emitted on `payment.debit.success` when a debit completed successfully.
+/// Emitted on `payment.debit.success` when a debit settled.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebitSuccess {
     pub debit_id: Uuid,
@@ -103,19 +96,15 @@ impl EventType for DebitSuccess {
     const SUBJECT: &'static str = "payment.debit.success";
 }
 
-/// Emitted on `payment.debit.failed` when a debit could not be fulfilled
-/// within the configured `maximum_wait` window.
-///
-/// `balance` is the user's balance **at the exact instant the failure decision
-/// was made**, giving downstream consumers a snapshot without requiring them to
-/// re-query the service.
+/// Emitted on `payment.debit.failed` when a parked debit could not be
+/// fulfilled within the configured maximum wait.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebitFailed {
     pub debit_id: Uuid,
     pub order_id: Uuid,
     pub user_id: Uuid,
     pub amount: u64,
-    /// Balance at the instant of failure — not necessarily zero.
+    /// Balance at the instant the failure was decided — not necessarily zero.
     pub balance: u64,
     pub reason: DebitFailureReason,
 }
@@ -127,7 +116,7 @@ impl EventType for DebitFailed {
 /// Why a deferred debit ultimately failed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DebitFailureReason {
-    /// The debit waited longer than the service's `maximum_wait` duration.
+    /// The debit waited longer than the service's maximum wait.
     MaximumWaitExceeded,
 }
 
@@ -136,20 +125,19 @@ pub enum DebitFailureReason {
 // ---------------------------------------------------------------------------
 
 /// A debit that could not be satisfied immediately and is waiting for a credit
-/// event to top up the account before its deadline.
+/// to top up the account before its deadline.
 ///
-/// Pending debits live **only in Moka** (see [`crate::pending_store`]). They
-/// are deliberately non-durable: if the process restarts, pending debits are
-/// lost and no `DebitFailed` event is emitted. The originating system must
-/// handle the absence of a result (e.g. by re-sending after a timeout). This
-/// keeps the implementation simple and avoids distributed locking.
+/// Pending debits live **only in the cache** (see [`crate::pending_store`]),
+/// so they are non-durable by design: if the cache is lost, those debits
+/// vanish without a `DebitFailed` event and the originating system must time
+/// out and retry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingDebit {
     pub debit_id: Uuid,
     pub order_id: Uuid,
     pub user_id: Uuid,
     pub amount: u64,
-    /// Absolute wall-clock deadline; once `Utc::now() >= expires_at` the debit
-    /// is abandoned and a `DebitFailed` event is emitted.
+    /// Wall-clock deadline; once reached the debit is abandoned and a
+    /// `DebitFailed` event is emitted on the next credit for this user.
     pub expires_at: DateTime<Utc>,
 }

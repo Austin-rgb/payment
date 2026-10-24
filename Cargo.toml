@@ -1,26 +1,21 @@
 [package]
 name = "payment"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
+description = "Ferrumec payment service: account balances, credits, deferred debits and a settled-debit ledger."
 
 [dependencies]
-actix-web = "4.13.0"
-actixutils = { version = "0.6.8", features = ["redis"] }
-anyhow = "1.0.102"
-async-trait = "0.1.89"
+actix-web = "4.15.0"
+async-trait = "0.1.92"
 chrono = { version = "0.4.45", features = ["serde"] }
 dotenvy = "0.15.7"
-futures = "0.3.32"
-infra = { path = "../infra" }
-moka = { version = "0.12.16", features = ["future"] }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.150"
-sqlx = { version = "0.9", features = ["postgres", "tls-rustls", "macros", "runtime-tokio"] }
+# `launch` = actix-web bootstrap + permission middleware + OpenTelemetry (implies `web`/`local`).
+# `pg`     = Postgres-backed `Infra`, `LocalInfra` and the transactional `Outbox`.
+ferrumec = { version = "0.4.6", features = ["local","web", "pg"] }
+serde = { version = "1.0.229", features = ["derive"] }
+sqlx = { version = "0.9", features = ["postgres", "uuid", "chrono", "macros", "runtime-tokio", "tls-rustls"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-uuid = { version = "1.23.2", features = ["v4", "serde"] }
-viewset = { version = "0.4.2" }
+uuid = { version = "1.26.1", features = ["v4", "serde"] }
+viewset = { version = "0.6.3", features = ["web"] }
 
-typed-eventbus = { path = "../event-stream" }
-thiserror = "2.0.20"
