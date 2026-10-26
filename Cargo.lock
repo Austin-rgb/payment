@@ -2603,9 +2603,9 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "viewset"
-version = "0.6.3"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c0e1a7f36e967d118b1935c56d5a85ac9e6d7901daacbd07c782efb529728ff"
+checksum = "596f0b33fcef2599b59eac965932c859a13fdeadf1fce4849cd066e6cee8c149"
 dependencies = [
  "actix-web",
  "async-trait",

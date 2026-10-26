@@ -17,5 +17,5 @@ sqlx = { version = "0.9", features = ["postgres", "uuid", "chrono", "macros", "r
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1.44"
 uuid = { version = "1.26.1", features = ["v4", "serde"] }
-viewset = { version = "0.6.3", features = ["web"] }
+viewset = { version = "0.6.5", features = ["web"] }
 
