@@ -11,11 +11,10 @@ chrono = { version = "0.4.45", features = ["serde"] }
 dotenvy = "0.15.7"
 # `launch` = actix-web bootstrap + permission middleware + OpenTelemetry (implies `web`/`local`).
 # `pg`     = Postgres-backed `Infra`, `LocalInfra` and the transactional `Outbox`.
-ferrumec = { version = "0.4.6", features = ["local","web", "pg"] }
+ferrumec = { version = "0.5", features = ["local","web", "pg"] }
 serde = { version = "1.0.229", features = ["derive"] }
 sqlx = { version = "0.9", features = ["postgres", "uuid", "chrono", "macros", "runtime-tokio", "tls-rustls"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1.44"
 uuid = { version = "1.26.1", features = ["v4", "serde"] }
-viewset = { version = "0.6.5", features = ["web"] }
-
+viewset = { version = "0.6.6", features = ["web"] }
